@@ -1,0 +1,8 @@
+{
+  "config.mode.name": "Game Mode",
+  "config.mode.tooltip": "Standalone = Mod works by self and doesn't use UnifiedExperienceSystem for Leveling, UnifiedExperience = If Unified Experience System Mod Exists with this mode, Spinning will require you learn the ability and so this mode also overrides config options like stamina drain and radius.",
+
+  "config.AbilityUses.name": "Ability Uses",
+  "config.AbilityUses.tooltip": "Choose if Energy or Stamina will be used for the spin ability"
+
+}
