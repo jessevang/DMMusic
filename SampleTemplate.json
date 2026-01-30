@@ -1,0 +1,96 @@
+﻿{
+  // ============================================================
+  // DMMusic – Replacement Key Priority (highest → lowest)
+  //
+  // When multiple entries could match the same music request,
+  // the MOST SPECIFIC key always wins.
+  //
+  // 1) Track + Location + EventId
+  //    "Track|Location=Town|EventId=123456"
+  //
+  // 2) Track + EventId
+  //    "Track|EventId=123456"
+  //
+  // 3) Track + Location + EventUp  (any event in that location)
+  //    "Track|Location=Town|EventUp"
+  //
+  // 4) Track + EventUp  (any event anywhere)
+  //    "Track|EventUp"
+  //
+  // 5) Track + Location
+  //    "Track|Location=Town"
+  //
+  // 6) Track only (default / fallback)
+  //    "Track"
+  //
+  // More specific keys override less specific ones.
+  // ============================================================
+
+
+  // ============================================================
+  // 1) Track + Location + specific EventId (MOST SPECIFIC)
+  // ============================================================
+  "spring1|Location=Town|EventId=123456": [
+    "assets/ExactEventTown_A.ogg",
+    "assets/ExactEventTown_B.ogg"
+  ],
+
+
+  // ============================================================
+  // 2) Track + specific EventId
+  // ============================================================
+  "spring1|EventId=123456": "assets/Specific Event Theme.ogg",
+
+
+  // ============================================================
+  // 3) Track + Location + EventUp (event in a specific location)
+  // ============================================================
+  "spring1|Location=Town|EventUp": [
+    "assets/TownEvent_A.ogg",
+    "assets/TownEvent_B.ogg"
+  ],
+
+
+  // ============================================================
+  // 4) Track + EventUp (any event anywhere)
+  // ============================================================
+  "spring1|EventUp": "assets/Spring Event Theme.ogg",
+
+
+  // ============================================================
+  // 5) Track + Location
+  // ============================================================
+  "spring1|Location=Town": "assets/Town Spring.ogg",
+
+  "spring1|Location=Forest": [
+    "assets/ForestSpring_A.ogg",
+    "assets/ForestSpring_B.ogg"
+  ],
+
+
+  // ============================================================
+  // 6) Track only (default / fallback)
+  // ============================================================
+
+  // Track only (single)
+  "spring1": "assets/Spring On The Meadow.ogg",
+
+  // Track only (shuffle list)
+  "spring2": [
+    "assets/Spring2_A.ogg",
+    "assets/Spring2_B.ogg"
+  ],
+
+
+  // ============================================================
+  // Special case: Temp cutscene bucket
+  // (Intro / cutscene-style music often reports Location=Temp
+  //  while EventUp=false)
+  // ============================================================
+  "grandpas_theme|Location=Temp": [
+    "assets/WhisperingGoodbye.ogg",
+    "assets/AltWhisper.ogg"
+  ],
+
+  "jojaOfficeSoundscape|Location=Temp": "assets/Endless Shift at JOJA.ogg"
+}

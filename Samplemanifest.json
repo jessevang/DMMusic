@@ -1,0 +1,12 @@
+﻿{
+  "Name": "Lo-Fi Valley Music Pack",
+  "Author": "CoolComposer",
+  "Version": "1.2.0",
+  "Description": "Lo-fi inspired background music for Stardew Valley via DM Music.",
+  "UniqueID": "CoolComposer.DMMusic.LoFiPack",
+  "MinimumApiVersion": "4.0.0",
+  "UpdateKeys": [ "Nexus:12345" ],
+  "ContentPackFor": {
+    "UniqueID": "Darkmushu1.DMMusic"
+  }
+}

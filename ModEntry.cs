@@ -12,11 +12,15 @@ namespace DMMusic
 {
     public class ModEntry : Mod
     {
+        internal static ModConfig Config { get; private set; } = new();
+
         internal static IMonitor SMonitor = null!;
         internal static IModHelper SHelper = null!;
 
         public override void Entry(IModHelper helper)
         {
+
+            Config = helper.ReadConfig<ModConfig>();
 
             SMonitor = this.Monitor;
             SHelper = helper;
