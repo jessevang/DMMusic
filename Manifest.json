@@ -5,15 +5,8 @@
   "Description": "Change game Music with own music",
   "UniqueID": "Darkmushu1.DMMusic",
   "EntryDll": "DMMusic.dll",
-  "MinimumApiVersion": "4.0.0",
-  "UpdateKeys": [],
-  "Dependencies": [
-    {
-      "UniqueID": "spacechase0.GenericModConfigMenu",
-      "IsRequired": false,
-      "MinimumVersion": "1.15.0"
-    }
-  ]
+  "MinimumApiVersion": "4.0.0"
+
 }
 
 

@@ -1,5 +1,17 @@
 ﻿{
-  "spring1": "assets/DontForgetMe.ogg",
-  "grandpas_theme": "assets/WhisperingGoodbye.ogg"
-
+  "MainTheme": "assets/Dust On The Morning Wind.ogg", //Intro to main menu song
+  "title_night": "assets/Stardew Mornings.ogg", //song when your about to pick to load a save
+  "spring1": "assets/Spring On The Meadow.ogg", //Song when  your day in spring
+  "grandpas_theme": "assets/WhisperingGoodbye.ogg", //when grandpa hands you a letter
+  "jojaOfficeSoundscape": "assets/Endless Shift at JOJA.ogg", //the joja corporation office scene when you are about to leave Joja corp
+  "musicboxsong": "assets/Stardew Echoes.ogg", //when yhou read grandpa's letter
+  "woodsTheme": "assets/Secret Forest, Softly.ogg", //Secret Forest: null,
+  //"springtown": null, //when you go into town
+  //"ocean": null, //beach 
+  //"playful": null, //bar scene or other playful song
+  //"Upper_Ambient": null, //Mine and some events
+  //"Frost_Ambient": null, //Frost Mine
+  "FrostMine": "assets/Deep in the Snow Cavern.ogg", //Frost Mine2
+  //"Lava_Ambient": null, //Lava Mine2
+  //"LavaMine": null //Lava Mine2
 }

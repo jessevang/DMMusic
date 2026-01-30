@@ -1,20 +1,54 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <!-- Match VoiceOverFrameworkMod behavior -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Platforms>AnyCPU</Platforms>
   </PropertyGroup>
 
+  <!-- ========================= -->
+  <!-- Compile sources explicitly -->
+  <!-- ========================= -->
+  <ItemGroup>
+    <Compile Include="ModEntry.cs" />
+    <Compile Include="**\*.cs" />
+  </ItemGroup>
+
+  <!-- ========================= -->
+  <!-- NuGet dependencies -->
+  <!-- ========================= -->
   <ItemGroup>
     <PackageReference Include="Lib.Harmony" Version="2.3.3" />
     <PackageReference Include="Pathoschild.Stardew.ModBuildConfig" Version="4.3.2" />
   </ItemGroup>
 
-	<ItemGroup>
-		<None Update="musicReplacements.json">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</None>
-	</ItemGroup>
+  <!-- ========================= -->
+  <!-- Content files -->
+  <!-- ========================= -->
+  <ItemGroup>
+    <None Include="assets\**\*.*">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+
+    <None Include="musicReplacements.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+
+    <None Include="manifest.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+
+    <None Include="README.md">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+
+    <None Include="thirdparty\NVorbis_License.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 
 </Project>
