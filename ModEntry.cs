@@ -11,8 +11,8 @@ namespace DMMusic
 {
     public class ModEntry : Mod
     {
-        // Needed to detect event end (true -> false) to stop looping event replacements.
         private bool _prevEventUp;
+        public HashSet<string> DisabledModIds { get; set; } = new();
 
         internal static ModConfig Config { get; set; } = new();
 

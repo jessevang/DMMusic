@@ -20,5 +20,8 @@
   "gmcm.page.replacements.tooltip": "Enable/disable specific replacement entries per content pack.",
 
   "gmcm.replacements.header": "Replacement entries",
-  "gmcm.replacements.header.tooltip": "Toggle individual replacement files on/off. Disabled entries are removed from shuffle pools."
+  "gmcm.replacements.header.tooltip": "Toggle individual replacement files on/off. Disabled entries are removed from shuffle pools.",
+  "gmcm.replacements.packToggle.name": "Enable this music pack",
+  "gmcm.replacements.packToggle.tooltip": "Turns this mod's music on/off without changing individual song toggles.\n\nMod: {0}\nID: {1}\n\nNote: Individual song checkboxes below are preserved and will apply when this pack is enabled."
+
 }

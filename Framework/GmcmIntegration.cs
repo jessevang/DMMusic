@@ -90,7 +90,6 @@ namespace DMMusic.Framework
                 fieldId: "ShowSuggestionsAlways"
             );
 
-
             api.AddSectionTitle(
                 mod: manifest,
                 text: () => T("gmcm.page.replacements.title"),
@@ -107,10 +106,17 @@ namespace DMMusic.Framework
                 monitor.Log($"Failed while ensuring replacement entries are loaded: {ex}", LogLevel.Warn);
             }
 
-            var groups = MusicManager
-                .GetAllReplacementEntries()
-                .GroupBy(e => e.Path.SourceModName)
-                .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            var allEntries = MusicManager.GetAllReplacementEntries().ToList();
+
+            var groups = allEntries
+                .GroupBy(e => e.Path.SourceModId, StringComparer.OrdinalIgnoreCase)
+                .Select(g =>
+                {
+                    var first = g.First();
+                    string name = string.IsNullOrWhiteSpace(first.Path.SourceModName) ? g.Key : first.Path.SourceModName;
+                    return new PackGroup(g.Key, name, g.ToList());
+                })
+                .OrderBy(g => g.SourceModName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             if (!ready || groups.Count == 0)
@@ -131,7 +137,8 @@ namespace DMMusic.Framework
 
             foreach (var packGroup in groups)
             {
-                string packName = string.IsNullOrWhiteSpace(packGroup.Key) ? "Unknown Mod" : packGroup.Key;
+                string packId = packGroup.SourceModId;
+                string packName = string.IsNullOrWhiteSpace(packGroup.SourceModName) ? "Unknown Mod" : packGroup.SourceModName;
 
                 api.AddSectionTitle(
                     mod: manifest,
@@ -139,7 +146,36 @@ namespace DMMusic.Framework
                     tooltip: () => $"Toggle replacement files provided by {packName}."
                 );
 
-                foreach (var entry in packGroup
+                api.AddBoolOption(
+                    mod: manifest,
+                    getValue: () =>
+                    {
+                        var cfg = getConfig();
+                        return !cfg.DisabledModIds.Contains(packId);
+                    },
+                    setValue: enabled =>
+                    {
+                        var cfg = getConfig();
+                        if (enabled)
+                            cfg.DisabledModIds.Remove(packId);
+                        else
+                            cfg.DisabledModIds.Add(packId);
+
+                        setConfig(cfg);
+                    },
+                    name: () => T("gmcm.replacements.packToggle.name"),
+                    tooltip: () => string.Format(T("gmcm.replacements.packToggle.tooltip"), packName, packId),
+                    fieldId: $"pack::{packId}"
+                );
+
+                bool packDisabled = false;
+                try
+                {
+                    packDisabled = getConfig().DisabledModIds.Contains(packId);
+                }
+                catch { }
+
+                foreach (var entry in packGroup.Entries
                     .OrderBy(e => GetTrackName(e.Key), NaturalStringComparer.Instance)
                     .ThenBy(e => e.Path.RelativePath ?? "", NaturalStringComparer.Instance)
                     .ThenBy(e => e.Key ?? "", NaturalStringComparer.Instance))
@@ -152,6 +188,8 @@ namespace DMMusic.Framework
 
                     api.AddBoolOption(
                         mod: manifest,
+                        // IMPORTANT: Individual checkbox reflects ONLY its own saved state.
+                        // We do NOT force it off when the pack is disabled.
                         getValue: () =>
                         {
                             var cfg = getConfig();
@@ -168,13 +206,19 @@ namespace DMMusic.Framework
                             setConfig(cfg);
                         },
                         name: () => label,
-                        tooltip: () => $"Mod: {path.SourceModName}\nKey: {key}\nFile: {path.RelativePath}",
+                        tooltip: () =>
+                        {
+                            string baseTip = $"Mod: {path.SourceModName}\nKey: {key}\nFile: {path.RelativePath}";
+                            if (packDisabled)
+                                baseTip += "\n\nNote: This mod is currently DISABLED above, so none of its songs will play until re-enabled.";
+                            return baseTip;
+                        },
                         fieldId: $"rep::{id}"
                     );
                 }
             }
 
-            monitor.Log($"Registered GMCM options (replacements: {groups.Sum(g => g.Count())}).", LogLevel.Info);
+            monitor.Log($"Registered GMCM options (replacements: {groups.Sum(g => g.Entries.Count)}).", LogLevel.Info);
         }
 
         private static string GetTrackName(string key)
@@ -186,6 +230,7 @@ namespace DMMusic.Framework
             return pipe >= 0 ? key.Substring(0, pipe) : key;
         }
 
+        private sealed record PackGroup(string SourceModId, string SourceModName, List<(string Key, MusicPath Path)> Entries);
 
         private sealed class NaturalStringComparer : IComparer<string>
         {

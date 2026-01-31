@@ -315,7 +315,7 @@ namespace DMMusic
         {
             matchedKey = "";
             pickedRelativePath = "";
-
+            
             if (_replacementMap.Count == 0)
                 ReloadConfig();
 
@@ -338,10 +338,15 @@ namespace DMMusic
             {
                 if (p == null) continue;
 
-                // If config isn't initialized for some reason, treat as enabled.
+                // Mod-level override: if the whole pack is disabled, skip all entries from it.
+                if (IsSourceModDisabled(p.SourceModId))
+                    continue;
+
+                // Per-entry disable
                 if (ModEntry.Config == null || !ModEntry.Config.DisabledReplacementIds.Contains(BuildReplacementId(matchedKey, p)))
                     paths.Add(p);
             }
+
 
             // If this key has replacements, but all were disabled, treat as "no replacement"
             if (paths.Count == 0)
@@ -756,5 +761,18 @@ namespace DMMusic
             string id = BuildReplacementId(matchedKey, _currentReplacementPicked);
             return !cfg.DisabledReplacementIds.Contains(id);
         }
+
+        private static bool IsSourceModDisabled(string sourceModId)
+        {
+            var cfg = ModEntry.Config;
+            if (cfg == null)
+                return false;
+
+            if (string.IsNullOrWhiteSpace(sourceModId))
+                return false;
+
+            return cfg.DisabledModIds.Contains(sourceModId);
+        }
+
     }
 }
