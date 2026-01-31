@@ -1,6 +1,6 @@
 ﻿# DMMusic
 
-This mod adds custom music to Stardew Valley, supporting `.ogg` and `.wav` audio files.
+This mod is adds a custom music player to Stardew Valley, supporting `.ogg` and `.wav` audio files.
 
 ## Third-Party Libraries
 

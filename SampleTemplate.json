@@ -1,35 +1,75 @@
 ﻿{
   // ============================================================
-  // DMMusic – Replacement Key Priority (highest → lowest)
+  // DMMusic – Priority
   //
   // When multiple entries could match the same music request,
   // the MOST SPECIFIC key always wins.
   //
-  // 1) Track + Location + EventId
+  // TrackPlay is OPTIONAL.
+  // If omitted, the entry applies to ALL occurrences of that track.
+  //
+  // Priority order:
+  //
+  // 1) Track + Location + EventId + TrackPlay
+  //    "Track|Location=Town|EventId=123456|TrackPlay=2"
+  //
+  // 2) Track + EventId + TrackPlay
+  //    "Track|EventId=123456|TrackPlay=2"
+  //
+  // 3) Track + Location + EventId
   //    "Track|Location=Town|EventId=123456"
   //
-  // 2) Track + EventId
+  // 4) Track + EventId
   //    "Track|EventId=123456"
   //
-  // 3) Track + Location + EventUp  (any event in that location)
+  // 5) Track + Location + EventUp
   //    "Track|Location=Town|EventUp"
   //
-  // 4) Track + EventUp  (any event anywhere)
+  // 6) Track + EventUp
   //    "Track|EventUp"
   //
-  // 5) Track + Location
+  // 7) Track + Location
   //    "Track|Location=Town"
   //
-  // 6) Track only (default / fallback)
+  // 8) Track only (default / fallback)
   //    "Track"
   //
   // More specific keys override less specific ones.
+  //
+  // NOTE:
+  // - TrackPlay=N counts how many times THIS TRACK is requested
+  //   during the SAME EVENT.
+  // - TrackPlay=1 = first time the track plays in the event
+  // - TrackPlay=2 = second time, etc.
   // ============================================================
 
 
   // ============================================================
-  // 1) Track + Location + specific EventId (MOST SPECIFIC)
+  // 1) Track + Location + EventId + TrackPlay (MOST SPECIFIC)
+  // Use this to replace ONLY a specific occurrence in an event.
   // ============================================================
+
+  // Example: The SECOND time spring1 plays in this event
+  "spring1|Location=Town|EventId=123456|TrackPlay=2": "assets/FinalMoment.ogg",
+
+  // Example: THIRD time the same track plays (rare but possible)
+  "spring1|Location=Town|EventId=123456|TrackPlay=3": "assets/Epilogue.ogg",
+
+
+  // ============================================================
+  // 2) Track + EventId + TrackPlay
+  // Applies anywhere in the event, regardless of location
+  // ============================================================
+
+  "spring1|EventId=123456|TrackPlay=1": "assets/EventIntro.ogg",
+
+
+  // ============================================================
+  // 3) Track + Location + EventId
+  // Applies to ALL plays of this track in this event
+  // (unless TrackPlay overrides it)
+  // ============================================================
+
   "spring1|Location=Town|EventId=123456": [
     "assets/ExactEventTown_A.ogg",
     "assets/ExactEventTown_B.ogg"
@@ -37,14 +77,16 @@
 
 
   // ============================================================
-  // 2) Track + specific EventId
+  // 4) Track + EventId
   // ============================================================
-  "spring1|EventId=123456": "assets/Specific Event Theme.ogg",
+
+  "spring1|EventId=123456": "assets/SpecificEventTheme.ogg",
 
 
   // ============================================================
-  // 3) Track + Location + EventUp (event in a specific location)
+  // 5) Track + Location + EventUp
   // ============================================================
+
   "spring1|Location=Town|EventUp": [
     "assets/TownEvent_A.ogg",
     "assets/TownEvent_B.ogg"
@@ -52,15 +94,17 @@
 
 
   // ============================================================
-  // 4) Track + EventUp (any event anywhere)
+  // 6) Track + EventUp
   // ============================================================
-  "spring1|EventUp": "assets/Spring Event Theme.ogg",
+
+  "spring1|EventUp": "assets/SpringEventTheme.ogg",
 
 
   // ============================================================
-  // 5) Track + Location
+  // 7) Track + Location
   // ============================================================
-  "spring1|Location=Town": "assets/Town Spring.ogg",
+
+  "spring1|Location=Town": "assets/TownSpring.ogg",
 
   "spring1|Location=Forest": [
     "assets/ForestSpring_A.ogg",
@@ -69,11 +113,11 @@
 
 
   // ============================================================
-  // 6) Track only (default / fallback)
+  // 8) Track only (default / fallback)
   // ============================================================
 
   // Track only (single)
-  "spring1": "assets/Spring On The Meadow.ogg",
+  "spring1": "assets/SpringOnTheMeadow.ogg",
 
   // Track only (shuffle list)
   "spring2": [
@@ -87,10 +131,11 @@
   // (Intro / cutscene-style music often reports Location=Temp
   //  while EventUp=false)
   // ============================================================
+
   "grandpas_theme|Location=Temp": [
     "assets/WhisperingGoodbye.ogg",
     "assets/AltWhisper.ogg"
   ],
 
-  "jojaOfficeSoundscape|Location=Temp": "assets/Endless Shift at JOJA.ogg"
+  "jojaOfficeSoundscape|Location=Temp": "assets/EndlessShiftAtJoja.ogg"
 }

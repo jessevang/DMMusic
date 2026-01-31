@@ -1,0 +1,24 @@
+﻿{
+  "gmcm.section.general.name": "General",
+  "gmcm.section.general.tooltip": "General settings for DMMusic.",
+
+  "gmcm.enableDebugLogging.name": "Enable debug logging",
+  "gmcm.enableDebugLogging.tooltip": "Log which tracks are requested and whether they are replaced.",
+
+  "gmcm.section.general.name2": "SMAPI Console Logs",
+  "gmcm.section.general.tooltip2": "Modify the settings below to add more logging to SMAPI Console",
+
+  "gmcm.showSuggestionsAlways.name": "Display lines to copy to replace music",
+  "gmcm.showSuggestionsAlways.tooltip": "Print suggested musicReplacements.json keys when a track is requested for easy copy and paste into your musicReplacement.json.",
+
+  "gmcm.vanillaInsteadPercent.name": "Chance to play vanilla music",
+  "gmcm.vanillaInsteadPercent.tooltip": "If a custom music replacement exists, this percent chance will let the original vanilla track play instead of custom audio. Defaults set at 0 so vanilla song doesn't play if custom audio exists.",
+
+  "gmcm.page.replacements.id": "replacements",
+  "gmcm.page.replacements.title": "Turn On / Off - Music Replacement",
+  "gmcm.page.replacements.link": "Manage replacement entries",
+  "gmcm.page.replacements.tooltip": "Enable/disable specific replacement entries per content pack.",
+
+  "gmcm.replacements.header": "Replacement entries",
+  "gmcm.replacements.header.tooltip": "Toggle individual replacement files on/off. Disabled entries are removed from shuffle pools."
+}

@@ -1,12 +1,17 @@
 {
-  "Name": "DMMusic",
+  "Name": "Music Replacement Framework",
   "Author": "Darkmushu1",
   "Version": "1.0.0",
-  "Description": "Change game Music with own music",
-  "UniqueID": "Darkmushu1.DMMusic",
-  "EntryDll": "DMMusic.dll",
-  "MinimumApiVersion": "4.0.0"
-
+  "Description": "Replaces game music with other musics",
+  "UniqueID": "Darkmushu1.MusicReplacementFramework",
+  "EntryDll": "MusicReplacementFramework.dll",
+  "MinimumApiVersion": "4.0.0",
+  "Dependencies": [
+    {
+      "UniqueID": "spacechase0.GenericModConfigMenu",
+      "IsRequired": false
+    }
+  ]
 }
 
 

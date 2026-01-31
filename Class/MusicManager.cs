@@ -2,6 +2,7 @@
 using Microsoft.Xna.Framework.Audio;
 using StardewModdingAPI;
 using StardewValley;
+using StardewValley.GameData;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -128,6 +129,13 @@ namespace DMMusic
 
             if (active.State == SoundState.Stopped)
             {
+                // If the currently playing replacement was disabled via GMCM, stop it and restore vanilla.
+                if (_currentReplacementGroupKey != null && !IsCurrentReplacementEnabledFor(_currentReplacementGroupKey))
+                {
+                    StopAllTracks(disposeInstances: false);
+                    return;
+                }
+
                 var now = DateTime.UtcNow;
 
                 if (_lastLoopRestartAttemptUtc == DateTime.MinValue ||
@@ -277,10 +285,10 @@ namespace DMMusic
             }
         }
 
-        public static string GetSuggestionLines(string trackId)
+        public static string GetSuggestionLines(string trackId, int? trackPlayIndex = null)
         {
             var ctx = MusicContextInfo.Get();
-            var keys = MusicReplacementResolver.BuildCandidateKeys(trackId, ctx);
+            var keys = MusicReplacementResolver.BuildCandidateKeys(trackId, ctx, trackPlayIndex);
             return MusicReplacementResolver.BuildSuggestionLines(keys);
         }
 
@@ -289,7 +297,14 @@ namespace DMMusic
             return MusicContextInfo.Get().ToDebugString();
         }
 
+        // Default overload (no TrackPlayIndex)
         public static bool TryPlayTrack(string trackId, out string matchedKey, out string pickedRelativePath)
+        {
+            return TryPlayTrack(trackId, trackPlayIndex: null, out matchedKey, out pickedRelativePath);
+        }
+
+        // Handles how many times a track is played in an event to allow different audios
+        public static bool TryPlayTrack(string trackId, int? trackPlayIndex, out string matchedKey, out string pickedRelativePath)
         {
             matchedKey = "";
             pickedRelativePath = "";
@@ -299,24 +314,118 @@ namespace DMMusic
 
             var ctx = MusicContextInfo.Get();
 
-            if (!MusicReplacementResolver.TryResolveKey(_replacementMap, trackId, ctx,
-                    out matchedKey, out var paths, out _))
+            // Build candidate keys including TrackPlay when available
+            var candidateKeys = MusicReplacementResolver.BuildCandidateKeys(trackId, ctx, trackPlayIndex);
+
+            if (!MusicReplacementResolver.TryResolveKey(_replacementMap, trackId, ctx, candidateKeys,
+                    out matchedKey, out var rawPaths))
             {
                 return false;
             }
 
-            // Sticky behavior: if same matched key requested again, keep current instance.
-            if (string.Equals(_currentReplacementGroupKey, matchedKey, StringComparison.OrdinalIgnoreCase) &&
-                _currentReplacementInstanceKey != null &&
-                _instances.TryGetValue(_currentReplacementInstanceKey, out var current) &&
-                current != null)
+            // ----------------------------
+            // Filter out disabled entries
+            // ----------------------------
+            var paths = new List<MusicPath>(rawPaths.Count);
+            foreach (var p in rawPaths)
+            {
+                if (p == null) continue;
+
+                // If config isn't initialized for some reason, treat as enabled.
+                if (ModEntry.Config == null || !ModEntry.Config.DisabledReplacementIds.Contains(BuildReplacementId(matchedKey, p)))
+                    paths.Add(p);
+            }
+
+            // If this key has replacements, but all were disabled, treat as "no replacement"
+            if (paths.Count == 0)
+                return false;
+
+            static bool SameEntry(MusicPath a, MusicPath b)
+            {
+                return string.Equals(a.RelativePath, b.RelativePath, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(a.SourceModId, b.SourceModId, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(a.BaseDir, b.BaseDir, StringComparison.OrdinalIgnoreCase);
+            }
+
+            // Ensure vanilla music is muted while we have a replacement running.
+            void EnsureVanillaMuted()
             {
                 if (_vanillaMusicVolume == null)
                 {
                     _vanillaMusicVolume = Game1.musicPlayerVolume;
                     Game1.musicPlayerVolume = 0f;
                 }
+            }
 
+            // ------------------------------------------------------------
+            // FILE-STICKY:
+            // Even if matchedKey changed, if the new pool contains the SAME file we’re already playing,
+            // keep playing without restarting.
+            // ------------------------------------------------------------
+            if (_currentReplacementPicked != null &&
+                _currentReplacementInstanceKey != null &&
+                _instances.TryGetValue(_currentReplacementInstanceKey, out var active) &&
+                active != null)
+            {
+                bool poolContainsCurrent = false;
+                foreach (var p in paths)
+                {
+                    if (p != null && SameEntry(p, _currentReplacementPicked))
+                    {
+                        poolContainsCurrent = true;
+                        break;
+                    }
+                }
+
+                if (poolContainsCurrent)
+                {
+                    EnsureVanillaMuted();
+
+                    pickedRelativePath = _currentReplacementPicked.RelativePath;
+                    _currentReplacementGroupKey = matchedKey;
+
+                    string newInstanceKey = $"{matchedKey}||{_currentReplacementPicked.SourceModId}||{_currentReplacementPicked.RelativePath}";
+
+                    if (!string.Equals(_currentReplacementInstanceKey, newInstanceKey, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _instances[newInstanceKey] = active; // safe alias
+                        _currentReplacementInstanceKey = newInstanceKey;
+                    }
+
+                    ApplyGameMusicVolume(active);
+
+                    if (active.State == SoundState.Playing)
+                        return true;
+
+                    if (active.State == SoundState.Stopped)
+                    {
+                        try
+                        {
+                            active.Play();
+                            return true;
+                        }
+                        catch { }
+                    }
+                }
+            }
+
+            // ------------------------------------------------------------
+            // KEY-STICKY:
+            // Same matchedKey requested again -> keep same instance (no restart).
+            // BUT: if the currently-playing entry was disabled in GMCM, do NOT keep it.
+            // ------------------------------------------------------------
+            if (string.Equals(_currentReplacementGroupKey, matchedKey, StringComparison.OrdinalIgnoreCase) &&
+                _currentReplacementInstanceKey != null &&
+                _instances.TryGetValue(_currentReplacementInstanceKey, out var current) &&
+                current != null)
+            {
+                if (!IsCurrentReplacementEnabledFor(matchedKey))
+                {
+                    StopAllTracks(disposeInstances: false);
+                    return false; // treat as no replacement so vanilla can play
+                }
+
+                EnsureVanillaMuted();
                 ApplyGameMusicVolume(current);
 
                 if (_currentReplacementPicked != null)
@@ -339,14 +448,16 @@ namespace DMMusic
                 }
             }
 
-            // Choose a file (only when key changes or no active instance)
+            // ------------------------------------------------------------
+            // Pick a (enabled) file from this key’s pool
+            // ------------------------------------------------------------
             MusicPath picked = PickRandom(paths);
             if (picked == null || string.IsNullOrWhiteSpace(picked.RelativePath))
                 return false;
 
             pickedRelativePath = picked.RelativePath;
 
-            // If key changed, stop previous group
+            // If key changed, stop previous group (prevents overlap)
             if (!string.Equals(_currentReplacementGroupKey, matchedKey, StringComparison.OrdinalIgnoreCase))
             {
                 StopAllTracks(disposeInstances: false);
@@ -375,12 +486,7 @@ namespace DMMusic
                     _instances[instanceKey] = instance;
                 }
 
-                if (_vanillaMusicVolume == null)
-                {
-                    _vanillaMusicVolume = Game1.musicPlayerVolume;
-                    Game1.musicPlayerVolume = 0f;
-                }
-
+                EnsureVanillaMuted();
                 ApplyGameMusicVolume(instance);
 
                 if (instance.State != SoundState.Playing)
@@ -399,10 +505,45 @@ namespace DMMusic
             }
         }
 
+        public static string BuildReplacementId(string matchedKey, MusicPath path)
+        {
+            return $"{matchedKey}||{path.SourceModId}||{path.RelativePath}".Trim();
+        }
+
+        public static bool IsReplacementEnabled(string key, MusicPath path)
+        {
+            var cfg = ModEntry.Config;
+            if (cfg == null)
+                return true;
+
+            string id = BuildReplacementId(key, path);
+            return !cfg.DisabledReplacementIds.Contains(id);
+        }
+
+        /// <summary>Return all replacement entries currently loaded (safe if packs removed).</summary>
+        public static IEnumerable<(string Key, MusicPath Path)> GetAllReplacementEntries()
+        {
+            if (_replacementMap.Count == 0)
+                ReloadConfig();
+
+            foreach (var kvp in _replacementMap)
+            {
+                string key = kvp.Key;
+                var list = kvp.Value;
+                if (list == null) continue;
+
+                foreach (var p in list)
+                {
+                    if (p == null) continue;
+                    yield return (key, p);
+                }
+            }
+        }
+
         private static MusicPath PickRandom(List<MusicPath> paths)
         {
             if (paths == null || paths.Count == 0)
-                return null;
+                return null!; // you only call when you already know there are items
 
             if (paths.Count == 1)
                 return paths[0];
@@ -452,7 +593,6 @@ namespace DMMusic
 
         public static string GetSourceModLabel(string pickedRelativePath)
         {
-            // Return the mod that provided the currently playing replacement (best-effort)
             if (_currentReplacementPicked != null)
                 return $"{_currentReplacementPicked.SourceModId} ({_currentReplacementPicked.SourceModName})";
 
@@ -466,11 +606,68 @@ namespace DMMusic
             if (_currentReplacementPicked != null)
                 return _currentReplacementPicked.SourceModName;
 
-            // fallback to this mod's name
             string selfId = ModEntry.SHelper.ModRegistry.ModID;
             return ModEntry.SHelper.ModRegistry.Get(selfId)?.Manifest?.Name ?? selfId;
         }
 
+        public static bool HasReplacement(string trackId, int? trackPlayIndex, out string matchedKey)
+        {
+            matchedKey = "";
 
+            if (_replacementMap.Count == 0)
+                ReloadConfig();
+
+            var ctx = MusicContextInfo.Get();
+            var candidateKeys = MusicReplacementResolver.BuildCandidateKeys(trackId, ctx, trackPlayIndex);
+
+            return MusicReplacementResolver.TryResolveKey(
+                _replacementMap,
+                trackId,
+                ctx,
+                candidateKeys,
+                out matchedKey,
+                out _
+            );
+        }
+
+        public static bool HasReplacement(string trackId, out string matchedKey)
+        {
+            return HasReplacement(trackId, trackPlayIndex: null, out matchedKey);
+        }
+
+        public static void StopVanillaAudioForContext(MusicContext musicContext)
+        {
+            try
+            {
+                Game1.stopMusicTrack(musicContext);
+            }
+            catch { }
+
+            try
+            {
+                if (Game1.currentSong != null)
+                    Game1.currentSong.Stop(AudioStopOptions.Immediate);
+            }
+            catch { }
+
+            try
+            {
+                Game1.loopingLocationCues?.StopAll();
+            }
+            catch { }
+        }
+
+        private static bool IsCurrentReplacementEnabledFor(string matchedKey)
+        {
+            if (_currentReplacementPicked == null)
+                return false;
+
+            var cfg = ModEntry.Config;
+            if (cfg == null)
+                return true;
+
+            string id = BuildReplacementId(matchedKey, _currentReplacementPicked);
+            return !cfg.DisabledReplacementIds.Contains(id);
+        }
     }
 }
