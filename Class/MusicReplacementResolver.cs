@@ -5,37 +5,36 @@ namespace DMMusic
 {
     internal static class MusicReplacementResolver
     {
-        // Priority: most-specific -> least-specific
-        // NEW: optional per-event, per-track play index (TrackPlay=1,2,3...)
+
         public static List<string> BuildCandidateKeys(string trackId, MusicContextInfo ctx, int? trackPlayIndex)
         {
             var list = new List<string>(capacity: 10);
 
-            // Most specific: exact event + exact play instance of this track in the event
+
             if (ctx.EventUp && ctx.EventId != null && trackPlayIndex.HasValue)
             {
                 list.Add($"{trackId}|Location={ctx.Location}|EventId={ctx.EventId}|TrackPlay={trackPlayIndex.Value}");
                 list.Add($"{trackId}|EventId={ctx.EventId}|TrackPlay={trackPlayIndex.Value}");
             }
 
-            // Next: event-specific (no play index)
+
             if (ctx.EventUp && ctx.EventId != null)
             {
                 list.Add($"{trackId}|Location={ctx.Location}|EventId={ctx.EventId}");
                 list.Add($"{trackId}|EventId={ctx.EventId}");
             }
 
-            // Next: event-up
+
             if (ctx.EventUp)
             {
                 list.Add($"{trackId}|Location={ctx.Location}|EventUp");
                 list.Add($"{trackId}|EventUp");
             }
 
-            // Next: location-only
+
             list.Add($"{trackId}|Location={ctx.Location}");
 
-            // Least specific: bare trackId
+
             list.Add(trackId);
 
             return list;
@@ -84,7 +83,7 @@ namespace DMMusic
             return TryResolveKey(map, trackId, ctx, candidateKeys, out matchedKey, out paths);
         }
 
-        // Suggest using array form so it's ready for shuffle (even if you only put 1 entry)
+
         public static string BuildSuggestionLines(IEnumerable<string> candidateKeys)
         {
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

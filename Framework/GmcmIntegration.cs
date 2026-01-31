@@ -3,22 +3,11 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Text;
 
 namespace DMMusic.Framework
 {
-    /// <summary>
-    /// Generic Mod Config Menu integration for Music Replacement Framework.
-    /// Single-page layout: General -> SMAPI options -> Music replacements list.
-    /// GMCM 1.15.0+ safe (does NOT use AddSubHeader).
-    /// </summary>
     internal static class GmcmIntegration
     {
-        /// <param name="ensureReplacementsLoaded">
-        /// Called before we enumerate replacements for the GMCM UI.
-        /// Return true if replacements are ready; false if none exist (or failed).
-        /// Example: () => MusicManager.TryBuildReplacementCache()
-        /// </param>
         public static void RegisterIfAvailable(
             IModHelper helper,
             IMonitor monitor,
@@ -37,9 +26,6 @@ namespace DMMusic.Framework
 
             string T(string key) => helper.Translation.Get(key);
 
-            // ----------------------------------------------------------
-            // Register (must be called first)
-            // ----------------------------------------------------------
             api.Register(
                 mod: manifest,
                 reset: () => setConfig(new ModConfig()),
@@ -47,9 +33,6 @@ namespace DMMusic.Framework
                 titleScreenOnly: false
             );
 
-            // ==========================================================
-            // Section: General
-            // ==========================================================
             api.AddSectionTitle(
                 mod: manifest,
                 text: () => T("gmcm.section.general.name"),
@@ -73,9 +56,6 @@ namespace DMMusic.Framework
                 fieldId: "VanillaInsteadPercent"
             );
 
-            // ==========================================================
-            // Section: SMAPI Console Logs
-            // ==========================================================
             api.AddSectionTitle(
                 mod: manifest,
                 text: () => T("gmcm.section.general.name2"),
@@ -110,16 +90,13 @@ namespace DMMusic.Framework
                 fieldId: "ShowSuggestionsAlways"
             );
 
-            // ==========================================================
-            // Section: Music replacements (NO separate page)
-            // ==========================================================
+
             api.AddSectionTitle(
                 mod: manifest,
-                text: () => T("gmcm.page.replacements.title"),        // "Music replacements"
-                tooltip: () => T("gmcm.page.replacements.tooltip")    // Enable/disable...
+                text: () => T("gmcm.page.replacements.title"),
+                tooltip: () => T("gmcm.page.replacements.tooltip")
             );
 
-            // Make sure entries are actually loaded BEFORE we build the list.
             bool ready = false;
             try
             {
@@ -156,7 +133,6 @@ namespace DMMusic.Framework
             {
                 string packName = string.IsNullOrWhiteSpace(packGroup.Key) ? "Unknown Mod" : packGroup.Key;
 
-                // Use SectionTitle as a safe “group header” (GMCM 1.15 safe)
                 api.AddSectionTitle(
                     mod: manifest,
                     text: () => packName,
@@ -164,20 +140,14 @@ namespace DMMusic.Framework
                 );
 
                 foreach (var entry in packGroup
-                    // ✅ sort by requested track name (prefix before the first '|')
                     .OrderBy(e => GetTrackName(e.Key), NaturalStringComparer.Instance)
-                    // then by file path
                     .ThenBy(e => e.Path.RelativePath ?? "", NaturalStringComparer.Instance)
-                    // stable tie-breaker
                     .ThenBy(e => e.Key ?? "", NaturalStringComparer.Instance))
                 {
                     string key = entry.Key;
                     var path = entry.Path;
 
-                    // Stable ID stored in config
                     string id = MusicManager.BuildReplacementId(key, path);
-
-                    // Label: key + relative path
                     string label = $"{key}  →  {path.RelativePath}";
 
                     api.AddBoolOption(
@@ -216,10 +186,7 @@ namespace DMMusic.Framework
             return pipe >= 0 ? key.Substring(0, pipe) : key;
         }
 
-        /// <summary>
-        /// Natural-ish comparer so spring2 < spring10, etc.
-        /// (Case-insensitive, compares digit runs numerically.)
-        /// </summary>
+
         private sealed class NaturalStringComparer : IComparer<string>
         {
             public static readonly NaturalStringComparer Instance = new();
@@ -237,12 +204,11 @@ namespace DMMusic.Framework
                     char ca = a[ia];
                     char cb = b[ib];
 
-                    // numeric chunk
                     if (char.IsDigit(ca) && char.IsDigit(cb))
                     {
                         long va = 0;
                         int sa = ia;
-                        while (sa < a.Length && a[sa] == '0') sa++; // skip leading zeros for value
+                        while (sa < a.Length && a[sa] == '0') sa++;
                         int ea = sa;
                         while (ea < a.Length && char.IsDigit(a[ea]))
                         {
@@ -260,11 +226,9 @@ namespace DMMusic.Framework
                             eb++;
                         }
 
-                        // compare numeric values first
                         int n = va.CompareTo(vb);
                         if (n != 0) return n;
 
-                        // if equal values, shorter numeric run (including leading zeros) first
                         int lenA = ea - ia;
                         int lenB = eb - ib;
                         n = lenA.CompareTo(lenB);
@@ -275,7 +239,6 @@ namespace DMMusic.Framework
                         continue;
                     }
 
-                    // text chunk (case-insensitive)
                     int ta = NextDigitIndex(a, ia);
                     int tb = NextDigitIndex(b, ib);
 
@@ -289,7 +252,6 @@ namespace DMMusic.Framework
                     ib = tb;
                 }
 
-                // one string ended
                 return (a.Length - ia).CompareTo(b.Length - ib);
             }
 

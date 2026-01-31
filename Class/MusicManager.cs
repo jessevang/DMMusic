@@ -38,6 +38,13 @@ namespace DMMusic
         private static readonly TimeSpan LoopRestartDebounce = TimeSpan.FromSeconds(2);
 
         // ---------------------------
+        // NEW: event-scoped tracking
+        // ---------------------------
+        // Any instanceKey that was started while ctx.EventUp==true is tracked here.
+        // When the event ends, you can call StopEventTracks() to prevent event music leaking into gameplay.
+        private static readonly HashSet<string> _eventInstanceKeys = new(StringComparer.OrdinalIgnoreCase);
+
+        // ---------------------------
         // audio load (wav/ogg)
         // ---------------------------
         private static SoundEffect LoadSoundEffectFromFile(string fullPath)
@@ -392,6 +399,10 @@ namespace DMMusic
                         _currentReplacementInstanceKey = newInstanceKey;
                     }
 
+                    // If we're in an event, mark this active instance as event-scoped
+                    if (ctx.EventUp && _currentReplacementInstanceKey != null)
+                        _eventInstanceKeys.Add(_currentReplacementInstanceKey);
+
                     ApplyGameMusicVolume(active);
 
                     if (active.State == SoundState.Playing)
@@ -433,6 +444,10 @@ namespace DMMusic
                     pickedRelativePath = _currentReplacementPicked.RelativePath;
                     _currentReplacementSourceModId = _currentReplacementPicked.SourceModId;
                 }
+
+                // If we're in an event, mark this active instance as event-scoped
+                if (ctx.EventUp && _currentReplacementInstanceKey != null)
+                    _eventInstanceKeys.Add(_currentReplacementInstanceKey);
 
                 if (current.State == SoundState.Playing)
                     return true;
@@ -496,6 +511,10 @@ namespace DMMusic
                 _currentReplacementPicked = picked;
                 _currentReplacementSourceModId = picked.SourceModId;
 
+                // NEW: If we started this while an event is up, treat it as event-scoped so we can kill it on event end.
+                if (ctx.EventUp)
+                    _eventInstanceKeys.Add(instanceKey);
+
                 return true;
             }
             catch (Exception ex)
@@ -551,6 +570,72 @@ namespace DMMusic
             return paths[_rng.Next(paths.Count)];
         }
 
+        /// <summary>
+        /// Stop ONLY the tracks that were started while an event was active.
+        /// Call this when an event ends to prevent event replacement music from leaking into normal gameplay.
+        /// </summary>
+        public static void StopEventTracks(bool stopVanillaToo)
+        {
+            try
+            {
+                foreach (var key in _eventInstanceKeys)
+                {
+                    if (!_instances.TryGetValue(key, out var inst) || inst == null)
+                        continue;
+
+                    try
+                    {
+                        if (inst.State != SoundState.Stopped)
+                            inst.Stop();
+
+                        // Event music leaking is usually safest to dispose, since we don't want it "sticking" and restarting.
+                        inst.Dispose();
+                    }
+                    catch { }
+
+                    _instances.Remove(key);
+
+                    // If this was the current active instance, clear current pointers
+                    if (_currentReplacementInstanceKey != null &&
+                        string.Equals(_currentReplacementInstanceKey, key, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _currentReplacementInstanceKey = null;
+                        _currentReplacementGroupKey = null;
+                        _currentReplacementPicked = null;
+                        _currentReplacementSourceModId = null;
+                    }
+                }
+
+                _eventInstanceKeys.Clear();
+
+                if (stopVanillaToo)
+                    StopVanillaAudioForContext(MusicContext.Default);
+
+                // If nothing custom is playing anymore, restore vanilla volume
+                if (_currentReplacementInstanceKey == null && _vanillaMusicVolume != null)
+                {
+                    Game1.musicPlayerVolume = _vanillaMusicVolume.Value;
+                    _vanillaMusicVolume = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                ModEntry.SMonitor.Log($"DMMusic: Error while stopping event-scoped tracks: {ex}", LogLevel.Error);
+            }
+        }
+
+        /// <summary>
+        /// Strong nuke: stop everything custom, optionally stop vanilla too.
+        /// Use this if you want "event ended -> absolutely no music continues from the event session".
+        /// </summary>
+        public static void StopAllCustomTracks(bool stopVanillaToo, bool disposeInstances)
+        {
+            StopAllTracks(disposeInstances);
+
+            if (stopVanillaToo)
+                StopVanillaAudioForContext(MusicContext.Default);
+        }
+
         public static void StopAllTracks(bool disposeInstances)
         {
             try
@@ -573,6 +658,8 @@ namespace DMMusic
 
                 if (disposeInstances)
                     _instances.Clear();
+
+                _eventInstanceKeys.Clear();
 
                 _currentReplacementGroupKey = null;
                 _currentReplacementInstanceKey = null;

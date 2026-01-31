@@ -24,8 +24,6 @@ namespace DMMusic
         private static readonly TimeSpan NoneStopDebounce = TimeSpan.FromMilliseconds(400);
 
         private static readonly TimeSpan TrackPlayDebounceWindow = TimeSpan.FromMilliseconds(900);
-
-        // NEW: only log "rain blocked" once per event
         private static string? _lastRainBlockedEventId;
         private static DateTime _lastRainBlockedUtc = DateTime.MinValue;
         private static readonly TimeSpan RainBlockedLogDebounce = TimeSpan.FromSeconds(2);
@@ -35,7 +33,7 @@ namespace DMMusic
             var ctxInfo = MusicContextInfo.Get();
             bool eventUp = ctxInfo.EventUp && !string.IsNullOrWhiteSpace(ctxInfo.EventId);
 
-            // Hard reset if we're not in an event.
+
             if (!eventUp)
             {
                 _activeEventId = null;
@@ -48,7 +46,7 @@ namespace DMMusic
             }
             else
             {
-                // New event => reset per-event state.
+
                 if (!string.Equals(_activeEventId, ctxInfo.EventId, StringComparison.OrdinalIgnoreCase))
                 {
                     _activeEventId = ctxInfo.EventId;
@@ -80,7 +78,6 @@ namespace DMMusic
                 return true;
             }
 
-            // If an event is running AND we've already played any custom replacement in this event,
             // then block "rain" from hijacking the music during the event.
             if (eventUp && _eventHasCustomReplacement && string.Equals(newTrackName, "rain", StringComparison.OrdinalIgnoreCase))
             {
@@ -89,7 +86,7 @@ namespace DMMusic
                 if (ModEntry.Config.EnableDebugLogging)
                     LogRainBlockedOnce(ctxInfo);
 
-                return false; // block vanilla changeMusicTrack("rain")
+                return false; 
             }
 
             int? trackPlayIndex = ComputeTrackPlayIndex(ctxInfo, newTrackName);
@@ -128,7 +125,7 @@ namespace DMMusic
             if (!replaced)
             {
                 MusicManager.StopAllTracks(disposeInstances: false);
-                // Intentionally do NOT clear _eventHasCustomReplacement here.
+       
             }
 
             return !replaced;
@@ -136,19 +133,18 @@ namespace DMMusic
 
         private static void LogRainBlockedOnce(MusicContextInfo ctxInfo)
         {
-            // ctxInfo.EventId is non-null here because eventUp was true
+
             string eid = ctxInfo.EventId!;
 
             var now = DateTime.UtcNow;
 
-            // Log once per event, but also allow an occasional re-log in case someone is watching live.
+
             bool sameEvent = string.Equals(_lastRainBlockedEventId, eid, StringComparison.OrdinalIgnoreCase);
             bool withinDebounce = (_lastRainBlockedUtc != DateTime.MinValue) && (now - _lastRainBlockedUtc) < RainBlockedLogDebounce;
 
             if (sameEvent && withinDebounce)
                 return;
 
-            // If same event, only log the first time (unless you really want periodic updates).
             // The debounce here prevents spam even if called constantly.
             _lastRainBlockedEventId = eid;
             _lastRainBlockedUtc = now;

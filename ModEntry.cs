@@ -11,6 +11,9 @@ namespace DMMusic
 {
     public class ModEntry : Mod
     {
+        // Needed to detect event end (true -> false) to stop looping event replacements.
+        private bool _prevEventUp;
+
         internal static ModConfig Config { get; set; } = new();
 
         internal static IMonitor SMonitor = null!;
@@ -32,7 +35,6 @@ namespace DMMusic
 
             try
             {
-                // Stardew 1.6 has changeMusicTrack(string, bool, MusicContext)
                 MethodInfo? target = typeof(Game1)
                     .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance)
                     .Where(m => m.Name == nameof(Game1.changeMusicTrack))
@@ -42,12 +44,11 @@ namespace DMMusic
                         return p.Length == 3
                                && p[0].ParameterType == typeof(string)
                                && p[1].ParameterType == typeof(bool);
-                        // p[2] is MusicContext in 1.6; we don't hard-check type to be resilient
                     });
 
                 if (target == null)
                 {
-                    SMonitor.Log("DMMusic: Could not find Stardew 1.6 Game1.changeMusicTrack(string,bool,MusicContext) to patch.", LogLevel.Error);
+                    SMonitor.Log("DMMusic: Could not find Game1.changeMusicTrack(string,bool,MusicContext) to patch.", LogLevel.Error);
                     return;
                 }
 
@@ -56,7 +57,10 @@ namespace DMMusic
                     prefix: new HarmonyMethod(typeof(MusicPatches), nameof(MusicPatches.ChangeMusicTrack_Prefix))
                 );
 
-                SMonitor.Log($"DMMusic: Patched {target.DeclaringType?.FullName}.{target.Name}({string.Join(", ", target.GetParameters().Select(p => p.ParameterType.Name))})", LogLevel.Info);
+                SMonitor.Log(
+                    $"DMMusic: Patched {target.DeclaringType?.FullName}.{target.Name}({string.Join(", ", target.GetParameters().Select(p => p.ParameterType.Name))})",
+                    LogLevel.Info
+                );
             }
             catch (Exception ex)
             {
@@ -66,29 +70,32 @@ namespace DMMusic
 
         private void OnGameLaunched(object? sender, GameLaunchedEventArgs e)
         {
-            // Register GMCM UI (only if GMCM is installed)
             GmcmIntegration.RegisterIfAvailable(
                 helper: this.Helper,
                 monitor: this.Monitor,
                 manifest: this.ModManifest,
                 getConfig: () => Config,
                 setConfig: cfg => Config = cfg,
-                 ensureReplacementsLoaded: () =>
-                 {
-                     // IMPORTANT: call whatever you use to discover packs / load replacement maps
-                     // Examples (use the one you actually have):
-                     // MusicManager.ReloadReplacementMap();
-                     // MusicManager.LoadContentPacks(helper);
-                     // return MusicManager.HasEntries;
-
-                     MusicManager.ReloadConfig(); // <-- replace with your real method
-                     return MusicManager.GetAllReplacementEntries().Any();
-                 }
+                ensureReplacementsLoaded: () =>
+                {
+                    MusicManager.ReloadConfig();
+                    return MusicManager.GetAllReplacementEntries().Any();
+                }
             );
         }
 
         private void OnUpdateTicked(object? sender, UpdateTickedEventArgs e)
         {
+            if (!Context.IsWorldReady)
+                return;
+
+            bool nowEventUp = Game1.eventUp && Game1.CurrentEvent != null;
+
+            if (_prevEventUp && !nowEventUp)
+                MusicManager.StopEventTracks(stopVanillaToo: true);
+
+            _prevEventUp = nowEventUp;
+
             MusicManager.UpdateVolumes();
         }
     }
