@@ -15,24 +15,28 @@ namespace DMMusic
 
         private static readonly Dictionary<string, int> _eventTrackPlayCounts = new(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, DateTime> _eventTrackLastRequestUtc = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly TimeSpan TrackPlayDebounceWindow = TimeSpan.FromMilliseconds(900);
 
-        private static string? _lastLoggedTrack;
-        private static DateTime _lastLoggedTrackUtc = DateTime.MinValue;
-        private static readonly TimeSpan LogDebounce = TimeSpan.FromMilliseconds(500);
+        private static string? _lastRainBlockedEventId;
+        private static DateTime _lastRainBlockedUtc = DateTime.MinValue;
+        private static readonly TimeSpan RainBlockedLogDebounce = TimeSpan.FromSeconds(2);
 
         private static DateTime _lastNoneStopUtc = DateTime.MinValue;
         private static readonly TimeSpan NoneStopDebounce = TimeSpan.FromMilliseconds(400);
 
-        private static readonly TimeSpan TrackPlayDebounceWindow = TimeSpan.FromMilliseconds(900);
-        private static string? _lastRainBlockedEventId;
-        private static DateTime _lastRainBlockedUtc = DateTime.MinValue;
-        private static readonly TimeSpan RainBlockedLogDebounce = TimeSpan.FromSeconds(2);
+        private static readonly Dictionary<string, DateTime> _lastLogUtcByKey = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly TimeSpan LogCooldownDefault = TimeSpan.FromSeconds(2);
+        private static readonly TimeSpan LogCooldownAmbient = TimeSpan.FromSeconds(10);
+
+        private static string? _decisionKeyActive;
+        private static bool _decisionUseVanilla;
+
+        private static string? _lastRequestedSessionKey;
 
         public static bool ChangeMusicTrack_Prefix(ref string newTrackName, bool track_interruptable, MusicContext music_context)
         {
             var ctxInfo = MusicContextInfo.Get();
             bool eventUp = ctxInfo.EventUp && !string.IsNullOrWhiteSpace(ctxInfo.EventId);
-
 
             if (!eventUp)
             {
@@ -46,7 +50,6 @@ namespace DMMusic
             }
             else
             {
-
                 if (!string.Equals(_activeEventId, ctxInfo.EventId, StringComparison.OrdinalIgnoreCase))
                 {
                     _activeEventId = ctxInfo.EventId;
@@ -78,7 +81,16 @@ namespace DMMusic
                 return true;
             }
 
-            // then block "rain" from hijacking the music during the event.
+            string sessionKey = eventUp
+                ? $"EID={ctxInfo.EventId ?? "Unknown"}||TRACK={newTrackName}"
+                : $"TRACK={newTrackName}";
+
+            if (!string.Equals(_lastRequestedSessionKey, sessionKey, StringComparison.OrdinalIgnoreCase))
+            {
+                _lastRequestedSessionKey = sessionKey;
+                _decisionKeyActive = null;
+            }
+
             if (eventUp && _eventHasCustomReplacement && string.Equals(newTrackName, "rain", StringComparison.OrdinalIgnoreCase))
             {
                 MusicManager.StopVanillaAudioForContext(music_context);
@@ -86,7 +98,7 @@ namespace DMMusic
                 if (ModEntry.Config.EnableDebugLogging)
                     LogRainBlockedOnce(ctxInfo);
 
-                return false; 
+                return false;
             }
 
             int? trackPlayIndex = ComputeTrackPlayIndex(ctxInfo, newTrackName);
@@ -97,14 +109,29 @@ namespace DMMusic
 
             if (pct > 0 && MusicManager.HasReplacement(newTrackName, trackPlayIndex, out string matchedKeyForRoll))
             {
-                int roll = _rng.Next(1, 101);
-                if (roll <= pct)
+                string decisionKey = sessionKey;
+
+                if (!string.Equals(_decisionKeyActive, decisionKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    _decisionKeyActive = decisionKey;
+                    int roll = _rng.Next(1, 101);
+                    _decisionUseVanilla = roll <= pct;
+                }
+
+                if (_decisionUseVanilla)
                 {
                     MusicManager.StopAllTracks(disposeInstances: false);
                     _eventHasCustomReplacement = false;
 
-                    if (ModEntry.Config.EnableDebugLogging)
-                        ModEntry.SMonitor.Log($"Track='{newTrackName}' => VANILLA (random skip {pct}%) Key='{matchedKeyForRoll}'", LogLevel.Info);
+                    LogDebugState(
+                        replaced: false,
+                        track: newTrackName,
+                        ctxInfo: ctxInfo,
+                        matchedKey: matchedKeyForRoll,
+                        pickedPath: "",
+                        trackPlayIndex: trackPlayIndex,
+                        note: $"(random skip {pct}%)"
+                    );
 
                     return true;
                 }
@@ -120,12 +147,12 @@ namespace DMMusic
                     _eventHasCustomReplacement = true;
             }
 
-            LogDebug(replaced, newTrackName, ctxInfo, matchedKey, pickedPath, trackPlayIndex);
+            LogDebugState(replaced, newTrackName, ctxInfo, matchedKey, pickedPath, trackPlayIndex);
 
             if (!replaced)
             {
                 MusicManager.StopAllTracks(disposeInstances: false);
-       
+                _eventHasCustomReplacement = false;
             }
 
             return !replaced;
@@ -133,11 +160,8 @@ namespace DMMusic
 
         private static void LogRainBlockedOnce(MusicContextInfo ctxInfo)
         {
-
             string eid = ctxInfo.EventId!;
-
             var now = DateTime.UtcNow;
-
 
             bool sameEvent = string.Equals(_lastRainBlockedEventId, eid, StringComparison.OrdinalIgnoreCase);
             bool withinDebounce = (_lastRainBlockedUtc != DateTime.MinValue) && (now - _lastRainBlockedUtc) < RainBlockedLogDebounce;
@@ -145,7 +169,6 @@ namespace DMMusic
             if (sameEvent && withinDebounce)
                 return;
 
-            // The debounce here prevents spam even if called constantly.
             _lastRainBlockedEventId = eid;
             _lastRainBlockedUtc = now;
 
@@ -183,39 +206,78 @@ namespace DMMusic
             return count;
         }
 
-        private static void LogDebug(bool replaced, string track, MusicContextInfo ctxInfo, string matchedKey, string pickedPath, int? trackPlayIndex)
+        private static void LogDebugState(bool replaced, string track, MusicContextInfo ctxInfo, string matchedKey, string pickedPath, int? trackPlayIndex, string? note = null)
         {
             if (!ModEntry.Config.EnableDebugLogging)
                 return;
 
-            var now = DateTime.UtcNow;
-            if (string.Equals(_lastLoggedTrack, track, StringComparison.OrdinalIgnoreCase) &&
-                (now - _lastLoggedTrackUtc) < LogDebounce)
-            {
-                return;
-            }
+            string baseKey = $"{(replaced ? "R" : "V")}||{track}||{matchedKey}||{pickedPath}||{note ?? ""}";
+            if (ctxInfo.EventUp)
+                baseKey += $"||EventId={ctxInfo.EventId ?? "Unknown"}||TrackPlay={(trackPlayIndex.HasValue ? trackPlayIndex.Value.ToString() : "-")}";
 
-            _lastLoggedTrack = track;
-            _lastLoggedTrackUtc = now;
+            var now = DateTime.UtcNow;
+            var cooldown = IsAmbientLike(track) ? LogCooldownAmbient : LogCooldownDefault;
+
+            if (_lastLogUtcByKey.TryGetValue(baseKey, out var last) && (now - last) < cooldown)
+                return;
+
+            _lastLogUtcByKey[baseKey] = now;
 
             if (replaced)
             {
                 string sourceModName = MusicManager.GetSourceModName();
-                ModEntry.SMonitor.Log($"Track='{track}' => Mod='{sourceModName}' Key='{matchedKey}' File='{pickedPath}'", LogLevel.Info);
+                if (!string.IsNullOrEmpty(note))
+                    ModEntry.SMonitor.Log($"Track='{track}' => Mod='{sourceModName}' Key='{matchedKey}' File='{pickedPath}' {note}", LogLevel.Info);
+                else
+                    ModEntry.SMonitor.Log($"Track='{track}' => Mod='{sourceModName}' Key='{matchedKey}' File='{pickedPath}'", LogLevel.Info);
             }
             else
             {
-                ModEntry.SMonitor.Log($"Track='{track}' => VANILLA ({ctxInfo.ToDebugString()})", LogLevel.Info);
+                if (!string.IsNullOrEmpty(note))
+                    ModEntry.SMonitor.Log($"Track='{track}' => VANILLA {note} ({ctxInfo.ToDebugString()})", LogLevel.Info);
+                else
+                    ModEntry.SMonitor.Log($"Track='{track}' => VANILLA ({ctxInfo.ToDebugString()})", LogLevel.Info);
             }
 
             if (!ModEntry.Config.ShowSuggestionsAlways)
                 return;
 
+            string sugKey = $"SUG||{track}||CTX={ctxInfo.Location ?? "Unknown"}||EventUp={ctxInfo.EventUp}";
+            if (ctxInfo.EventUp)
+                sugKey += $"||EventId={ctxInfo.EventId ?? "Unknown"}";
+            sugKey += $"||TrackPlay={(trackPlayIndex.HasValue ? trackPlayIndex.Value.ToString() : "-")}";
+
+            var sugCooldown = IsAmbientLike(track) ? TimeSpan.FromSeconds(30) : TimeSpan.FromSeconds(15);
+
+            if (_lastLogUtcByKey.TryGetValue(sugKey, out var lastSug) && (now - lastSug) < sugCooldown)
+                return;
+
+            _lastLogUtcByKey[sugKey] = now;
+
             var candidateKeys = MusicReplacementResolver.BuildCandidateKeys(track, ctxInfo, trackPlayIndex);
 
-            ModEntry.SMonitor.Log("Want to replace this music? Add a line below into your musicReplacements.json:", LogLevel.Info);
-            foreach (var line in MusicReplacementResolver.BuildSingleLineSuggestions(candidateKeys))
-                ModEntry.SMonitor.Log($"   {line}", LogLevel.Info);
+            var lines = MusicReplacementResolver.BuildSingleLineSuggestions(candidateKeys);
+            if (lines == null)
+                return;
+
+            string block = "Want to replace this music? Add a line below into your musicReplacements.json:";
+            foreach (var line in lines)
+                block += "\n                  " + line;
+
+            block += "\n----------------------------------------------------------------------------------";
+
+            ModEntry.SMonitor.Log(block, LogLevel.Info);
+        }
+
+
+
+
+        private static bool IsAmbientLike(string track)
+        {
+            if (string.IsNullOrWhiteSpace(track))
+                return false;
+
+            return track.IndexOf("ambient", StringComparison.OrdinalIgnoreCase) >= 0;
         }
     }
 }

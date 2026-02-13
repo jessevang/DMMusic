@@ -3,15 +3,7 @@ using System;
 
 namespace DMMusic.Framework
 {
-    /// <summary>
-    /// Minimal GMCM API interface for DMMusic.
-    /// Keep it small and signatures must match GMCM exactly for SMAPI proxy mapping.
-    ///
-    /// IMPORTANT:
-    /// - GMCM 1.15.0 does NOT include AddSubHeader (added in 1.16.0).
-    /// - If your interface includes methods that don't exist in the installed GMCM,
-    ///   SMAPI will fail proxy mapping on load.
-    /// </summary>
+
     public interface IGenericModConfigMenuApi
     {
         void Register(IManifest mod, Action reset, Action save, bool titleScreenOnly = false);
@@ -43,7 +35,7 @@ namespace DMMusic.Framework
         void AddPage(IManifest mod, string pageId, Func<string> pageTitle = null);
         void AddPageLink(IManifest mod, string pageId, Func<string> text, Func<string> tooltip = null);
 
-        // Optional but safe on 1.15.0 and useful for grouping/labels.
+
         void AddParagraph(IManifest mod, Func<string> text);
     }
 }

@@ -6,47 +6,37 @@ using StardewValley.GameData;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text.Json;
 
 namespace DMMusic
 {
-    // path to music files from music packs
     internal sealed record MusicPath(string RelativePath, string SourceModId, string SourceModName, string BaseDir);
 
     internal static class MusicManager
     {
-        // key -> list of music entries (1 or many)
         private static Dictionary<string, List<MusicPath>> _replacementMap = new(StringComparer.OrdinalIgnoreCase);
 
-        // current chosen entry (for logging + source mod)
         private static MusicPath? _currentReplacementPicked;
         private static string? _currentReplacementSourceModId;
-
-        // used to not play 2 songs at the same time (exact instance key)
         private static string? _currentReplacementInstanceKey;
 
-        // cache instances by matchedKey||SourceModId||relativePath (so shuffle works safely)
         private static readonly Dictionary<string, SoundEffectInstance> _instances = new(StringComparer.OrdinalIgnoreCase);
 
         private static float? _vanillaMusicVolume;
-        private static string? _currentReplacementGroupKey; // matchedKey currently active (logical group)
+        private static string? _currentReplacementGroupKey;
+
+        private static string? _currentCustomTrackId;
+
+        private static string? _lastCustomStartTrackId;
+        private static DateTime _lastCustomStartUtc = DateTime.MinValue;
+        private static readonly TimeSpan DuplicateCustomStartDebounce = TimeSpan.FromMilliseconds(450);
 
         private static readonly Random _rng = new();
 
-        // tracks music for inactive windows + debounce
         private static DateTime _lastLoopRestartAttemptUtc = DateTime.MinValue;
-        private static readonly TimeSpan LoopRestartDebounce = TimeSpan.FromSeconds(2);
+        private static readonly TimeSpan LoopRestartDebounce = TimeSpan.FromMilliseconds(150);
 
-        // ---------------------------
-        // NEW: event-scoped tracking
-        // ---------------------------
-        // Any instanceKey that was started while ctx.EventUp==true is tracked here.
-        // When the event ends, you can call StopEventTracks() to prevent event music leaking into gameplay.
         private static readonly HashSet<string> _eventInstanceKeys = new(StringComparer.OrdinalIgnoreCase);
 
-        // ---------------------------
-        // audio load (wav/ogg)
-        // ---------------------------
         private static SoundEffect LoadSoundEffectFromFile(string fullPath)
         {
             string ext = Path.GetExtension(fullPath).ToLowerInvariant();
@@ -105,6 +95,28 @@ namespace DMMusic
                 instance.Volume = Game1.options.musicVolumeLevel;
         }
 
+        public static bool IsCustomPlayingForTrack(string trackId)
+        {
+            if (string.IsNullOrWhiteSpace(trackId))
+                return false;
+
+            if (_currentReplacementInstanceKey == null)
+                return false;
+
+            if (!_instances.TryGetValue(_currentReplacementInstanceKey, out var inst) || inst == null)
+                return false;
+
+            if (inst.State != SoundState.Playing)
+                return false;
+
+            return string.Equals(_currentCustomTrackId, trackId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static void ClearCurrentCustomTrackId()
+        {
+            _currentCustomTrackId = null;
+        }
+
         public static void UpdateVolumes()
         {
             if (Game1.options == null)
@@ -117,6 +129,9 @@ namespace DMMusic
                 if (inst != null && inst.State == SoundState.Playing)
                     inst.Volume = vol;
             }
+
+            if (_currentReplacementInstanceKey != null)
+                EnforceVanillaMutedAndStopped();
 
             if (_currentReplacementInstanceKey == null)
                 return;
@@ -134,15 +149,14 @@ namespace DMMusic
             if (!gameIsActive)
                 return;
 
+            if (_currentReplacementGroupKey != null && !IsCurrentReplacementEnabledFor(_currentReplacementGroupKey))
+            {
+                StopAllTracks(disposeInstances: false);
+                return;
+            }
+
             if (active.State == SoundState.Stopped)
             {
-                // If the currently playing replacement was disabled via GMCM, stop it and restore vanilla.
-                if (_currentReplacementGroupKey != null && !IsCurrentReplacementEnabledFor(_currentReplacementGroupKey))
-                {
-                    StopAllTracks(disposeInstances: false);
-                    return;
-                }
-
                 var now = DateTime.UtcNow;
 
                 if (_lastLoopRestartAttemptUtc == DateTime.MinValue ||
@@ -150,9 +164,11 @@ namespace DMMusic
                 {
                     _lastLoopRestartAttemptUtc = now;
 
+                    try { StopInstanceImmediate(active); } catch { }
+
                     try
                     {
-                        ApplyGameMusicVolume(active);
+                        active.Volume = vol;
                         active.Play();
                     }
                     catch { }
@@ -166,9 +182,9 @@ namespace DMMusic
             {
                 ModEntry.SMonitor.Log("DMMusic: ReloadConfig() – reading musicReplacements.json (base + content packs)...", LogLevel.Info);
 
-                var options = new JsonDocumentOptions
+                var options = new System.Text.Json.JsonDocumentOptions
                 {
-                    CommentHandling = JsonCommentHandling.Skip,
+                    CommentHandling = System.Text.Json.JsonCommentHandling.Skip,
                     AllowTrailingCommas = true
                 };
 
@@ -184,9 +200,9 @@ namespace DMMusic
 
                     string json = File.ReadAllText(fullPath);
 
-                    using JsonDocument doc = JsonDocument.Parse(json, options);
+                    using var doc = System.Text.Json.JsonDocument.Parse(json, options);
 
-                    if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                    if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
                     {
                         ModEntry.SMonitor.Log($"DMMusic: '{sourceModId}' musicReplacements.json root must be a JSON object.", LogLevel.Warn);
                         return;
@@ -195,24 +211,23 @@ namespace DMMusic
                     foreach (var prop in doc.RootElement.EnumerateObject())
                     {
                         string key = prop.Name;
-                        JsonElement val = prop.Value;
+                        var val = prop.Value;
 
-                        // normalize into list of relative paths
                         List<string>? relPaths = null;
 
-                        if (val.ValueKind == JsonValueKind.String)
+                        if (val.ValueKind == System.Text.Json.JsonValueKind.String)
                         {
                             string? p = val.GetString();
                             if (!string.IsNullOrWhiteSpace(p))
                                 relPaths = new List<string> { p! };
                         }
-                        else if (val.ValueKind == JsonValueKind.Array)
+                        else if (val.ValueKind == System.Text.Json.JsonValueKind.Array)
                         {
                             relPaths = new List<string>();
 
                             foreach (var item in val.EnumerateArray())
                             {
-                                if (item.ValueKind != JsonValueKind.String)
+                                if (item.ValueKind != System.Text.Json.JsonValueKind.String)
                                     continue;
 
                                 string? p = item.GetString();
@@ -223,7 +238,7 @@ namespace DMMusic
                             if (relPaths.Count == 0)
                                 relPaths = null;
                         }
-                        else if (val.ValueKind == JsonValueKind.Null)
+                        else if (val.ValueKind == System.Text.Json.JsonValueKind.Null)
                         {
                             relPaths = null;
                         }
@@ -251,7 +266,6 @@ namespace DMMusic
                     filesLoaded++;
                 }
 
-                // 1) Base file in DMMusic (optional)
                 string baseModId = ModEntry.SHelper.ModRegistry.ModID;
                 string baseModName = ModEntry.SHelper.ModRegistry.Get(baseModId)?.Manifest?.Name ?? baseModId;
                 string baseDir = ModEntry.SHelper.DirectoryPath;
@@ -262,7 +276,6 @@ namespace DMMusic
                 else
                     ModEntry.SMonitor.Log("DMMusic: Base musicReplacements.json not found (OK if using only content packs).", LogLevel.Trace);
 
-                // 2) Content packs targeting DMMusic
                 foreach (var pack in ModEntry.SHelper.ContentPacks.GetOwned())
                 {
                     string packDir = pack.DirectoryPath;
@@ -304,24 +317,55 @@ namespace DMMusic
             return MusicContextInfo.Get().ToDebugString();
         }
 
-        // Default overload (no TrackPlayIndex)
         public static bool TryPlayTrack(string trackId, out string matchedKey, out string pickedRelativePath)
         {
             return TryPlayTrack(trackId, trackPlayIndex: null, out matchedKey, out pickedRelativePath);
         }
 
-        // Handles how many times a track is played in an event to allow different audios
         public static bool TryPlayTrack(string trackId, int? trackPlayIndex, out string matchedKey, out string pickedRelativePath)
         {
             matchedKey = "";
             pickedRelativePath = "";
-            
+
             if (_replacementMap.Count == 0)
                 ReloadConfig();
 
-            var ctx = MusicContextInfo.Get();
+            if (IsCustomPlayingForTrack(trackId))
+            {
+                if (_currentReplacementPicked != null)
+                    pickedRelativePath = _currentReplacementPicked.RelativePath;
+                if (_currentReplacementGroupKey != null)
+                    matchedKey = _currentReplacementGroupKey;
+                return true;
+            }
 
-            // Build candidate keys including TrackPlay when available
+            var nowUtc = DateTime.UtcNow;
+
+            if (!string.IsNullOrWhiteSpace(_lastCustomStartTrackId) &&
+                string.Equals(_lastCustomStartTrackId, trackId, StringComparison.OrdinalIgnoreCase) &&
+                _lastCustomStartUtc != DateTime.MinValue &&
+                (nowUtc - _lastCustomStartUtc) < DuplicateCustomStartDebounce)
+            {
+                if (_currentReplacementInstanceKey != null &&
+                    _instances.TryGetValue(_currentReplacementInstanceKey, out var inst) &&
+                    inst != null)
+                {
+                    EnforceVanillaMutedAndStopped();
+                    ApplyGameMusicVolume(inst);
+
+                    if (inst.State == SoundState.Playing)
+                    {
+                        _currentCustomTrackId = trackId;
+                        if (_currentReplacementPicked != null)
+                            pickedRelativePath = _currentReplacementPicked.RelativePath;
+                        if (_currentReplacementGroupKey != null)
+                            matchedKey = _currentReplacementGroupKey;
+                        return true;
+                    }
+                }
+            }
+
+            var ctx = MusicContextInfo.Get();
             var candidateKeys = MusicReplacementResolver.BuildCandidateKeys(trackId, ctx, trackPlayIndex);
 
             if (!MusicReplacementResolver.TryResolveKey(_replacementMap, trackId, ctx, candidateKeys,
@@ -330,25 +374,16 @@ namespace DMMusic
                 return false;
             }
 
-            // ----------------------------
-            // Filter out disabled entries
-            // ----------------------------
             var paths = new List<MusicPath>(rawPaths.Count);
             foreach (var p in rawPaths)
             {
                 if (p == null) continue;
+                if (IsSourceModDisabled(p.SourceModId)) continue;
 
-                // Mod-level override: if the whole pack is disabled, skip all entries from it.
-                if (IsSourceModDisabled(p.SourceModId))
-                    continue;
-
-                // Per-entry disable
                 if (ModEntry.Config == null || !ModEntry.Config.DisabledReplacementIds.Contains(BuildReplacementId(matchedKey, p)))
                     paths.Add(p);
             }
 
-
-            // If this key has replacements, but all were disabled, treat as "no replacement"
             if (paths.Count == 0)
                 return false;
 
@@ -359,7 +394,6 @@ namespace DMMusic
                     && string.Equals(a.BaseDir, b.BaseDir, StringComparison.OrdinalIgnoreCase);
             }
 
-            // Ensure vanilla music is muted while we have a replacement running.
             void EnsureVanillaMuted()
             {
                 if (_vanillaMusicVolume == null)
@@ -369,11 +403,6 @@ namespace DMMusic
                 }
             }
 
-            // ------------------------------------------------------------
-            // FILE-STICKY:
-            // Even if matchedKey changed, if the new pool contains the SAME file we’re already playing,
-            // keep playing without restarting.
-            // ------------------------------------------------------------
             if (_currentReplacementPicked != null &&
                 _currentReplacementInstanceKey != null &&
                 _instances.TryGetValue(_currentReplacementInstanceKey, out var active) &&
@@ -392,6 +421,7 @@ namespace DMMusic
                 if (poolContainsCurrent)
                 {
                     EnsureVanillaMuted();
+                    EnforceVanillaMutedAndStopped();
 
                     pickedRelativePath = _currentReplacementPicked.RelativePath;
                     _currentReplacementGroupKey = matchedKey;
@@ -400,24 +430,32 @@ namespace DMMusic
 
                     if (!string.Equals(_currentReplacementInstanceKey, newInstanceKey, StringComparison.OrdinalIgnoreCase))
                     {
-                        _instances[newInstanceKey] = active; // safe alias
+                        _instances[newInstanceKey] = active;
                         _currentReplacementInstanceKey = newInstanceKey;
                     }
 
-                    // If we're in an event, mark this active instance as event-scoped
                     if (ctx.EventUp && _currentReplacementInstanceKey != null)
                         _eventInstanceKeys.Add(_currentReplacementInstanceKey);
 
                     ApplyGameMusicVolume(active);
 
                     if (active.State == SoundState.Playing)
+                    {
+                        _currentCustomTrackId = trackId;
+                        _lastCustomStartTrackId = trackId;
+                        _lastCustomStartUtc = nowUtc;
                         return true;
+                    }
 
                     if (active.State == SoundState.Stopped)
                     {
                         try
                         {
+                            StopInstanceImmediate(active);
                             active.Play();
+                            _currentCustomTrackId = trackId;
+                            _lastCustomStartTrackId = trackId;
+                            _lastCustomStartUtc = nowUtc;
                             return true;
                         }
                         catch { }
@@ -425,11 +463,6 @@ namespace DMMusic
                 }
             }
 
-            // ------------------------------------------------------------
-            // KEY-STICKY:
-            // Same matchedKey requested again -> keep same instance (no restart).
-            // BUT: if the currently-playing entry was disabled in GMCM, do NOT keep it.
-            // ------------------------------------------------------------
             if (string.Equals(_currentReplacementGroupKey, matchedKey, StringComparison.OrdinalIgnoreCase) &&
                 _currentReplacementInstanceKey != null &&
                 _instances.TryGetValue(_currentReplacementInstanceKey, out var current) &&
@@ -438,10 +471,11 @@ namespace DMMusic
                 if (!IsCurrentReplacementEnabledFor(matchedKey))
                 {
                     StopAllTracks(disposeInstances: false);
-                    return false; // treat as no replacement so vanilla can play
+                    return false;
                 }
 
                 EnsureVanillaMuted();
+                EnforceVanillaMutedAndStopped();
                 ApplyGameMusicVolume(current);
 
                 if (_currentReplacementPicked != null)
@@ -450,34 +484,38 @@ namespace DMMusic
                     _currentReplacementSourceModId = _currentReplacementPicked.SourceModId;
                 }
 
-                // If we're in an event, mark this active instance as event-scoped
                 if (ctx.EventUp && _currentReplacementInstanceKey != null)
                     _eventInstanceKeys.Add(_currentReplacementInstanceKey);
 
                 if (current.State == SoundState.Playing)
+                {
+                    _currentCustomTrackId = trackId;
+                    _lastCustomStartTrackId = trackId;
+                    _lastCustomStartUtc = nowUtc;
                     return true;
+                }
 
                 if (current.State == SoundState.Stopped)
                 {
                     try
                     {
+                        StopInstanceImmediate(current);
                         current.Play();
+                        _currentCustomTrackId = trackId;
+                        _lastCustomStartTrackId = trackId;
+                        _lastCustomStartUtc = nowUtc;
                         return true;
                     }
                     catch { }
                 }
             }
 
-            // ------------------------------------------------------------
-            // Pick a (enabled) file from this key’s pool
-            // ------------------------------------------------------------
             MusicPath picked = PickRandom(paths);
             if (picked == null || string.IsNullOrWhiteSpace(picked.RelativePath))
                 return false;
 
             pickedRelativePath = picked.RelativePath;
 
-            // If key changed, stop previous group (prevents overlap)
             if (!string.Equals(_currentReplacementGroupKey, matchedKey, StringComparison.OrdinalIgnoreCase))
             {
                 StopAllTracks(disposeInstances: false);
@@ -507,18 +545,25 @@ namespace DMMusic
                 }
 
                 EnsureVanillaMuted();
+                EnforceVanillaMutedAndStopped();
                 ApplyGameMusicVolume(instance);
 
                 if (instance.State != SoundState.Playing)
+                {
+                    try { StopInstanceImmediate(instance); } catch { }
                     instance.Play();
+                }
 
                 _currentReplacementInstanceKey = instanceKey;
                 _currentReplacementPicked = picked;
                 _currentReplacementSourceModId = picked.SourceModId;
+                _currentCustomTrackId = trackId;
 
-                // NEW: If we started this while an event is up, treat it as event-scoped so we can kill it on event end.
                 if (ctx.EventUp)
                     _eventInstanceKeys.Add(instanceKey);
+
+                _lastCustomStartTrackId = trackId;
+                _lastCustomStartUtc = nowUtc;
 
                 return true;
             }
@@ -530,9 +575,7 @@ namespace DMMusic
         }
 
         public static string BuildReplacementId(string matchedKey, MusicPath path)
-        {
-            return $"{matchedKey}||{path.SourceModId}||{path.RelativePath}".Trim();
-        }
+            => $"{matchedKey}||{path.SourceModId}||{path.RelativePath}".Trim();
 
         public static bool IsReplacementEnabled(string key, MusicPath path)
         {
@@ -544,7 +587,6 @@ namespace DMMusic
             return !cfg.DisabledReplacementIds.Contains(id);
         }
 
-        /// <summary>Return all replacement entries currently loaded (safe if packs removed).</summary>
         public static IEnumerable<(string Key, MusicPath Path)> GetAllReplacementEntries()
         {
             if (_replacementMap.Count == 0)
@@ -567,7 +609,7 @@ namespace DMMusic
         private static MusicPath PickRandom(List<MusicPath> paths)
         {
             if (paths == null || paths.Count == 0)
-                return null!; // you only call when you already know there are items
+                return null!;
 
             if (paths.Count == 1)
                 return paths[0];
@@ -575,10 +617,6 @@ namespace DMMusic
             return paths[_rng.Next(paths.Count)];
         }
 
-        /// <summary>
-        /// Stop ONLY the tracks that were started while an event was active.
-        /// Call this when an event ends to prevent event replacement music from leaking into normal gameplay.
-        /// </summary>
         public static void StopEventTracks(bool stopVanillaToo)
         {
             try
@@ -591,16 +629,14 @@ namespace DMMusic
                     try
                     {
                         if (inst.State != SoundState.Stopped)
-                            inst.Stop();
+                            StopInstanceImmediate(inst);
 
-                        // Event music leaking is usually safest to dispose, since we don't want it "sticking" and restarting.
                         inst.Dispose();
                     }
                     catch { }
 
                     _instances.Remove(key);
 
-                    // If this was the current active instance, clear current pointers
                     if (_currentReplacementInstanceKey != null &&
                         string.Equals(_currentReplacementInstanceKey, key, StringComparison.OrdinalIgnoreCase))
                     {
@@ -608,6 +644,7 @@ namespace DMMusic
                         _currentReplacementGroupKey = null;
                         _currentReplacementPicked = null;
                         _currentReplacementSourceModId = null;
+                        _currentCustomTrackId = null;
                     }
                 }
 
@@ -616,7 +653,6 @@ namespace DMMusic
                 if (stopVanillaToo)
                     StopVanillaAudioForContext(MusicContext.Default);
 
-                // If nothing custom is playing anymore, restore vanilla volume
                 if (_currentReplacementInstanceKey == null && _vanillaMusicVolume != null)
                 {
                     Game1.musicPlayerVolume = _vanillaMusicVolume.Value;
@@ -629,10 +665,6 @@ namespace DMMusic
             }
         }
 
-        /// <summary>
-        /// Strong nuke: stop everything custom, optionally stop vanilla too.
-        /// Use this if you want "event ended -> absolutely no music continues from the event session".
-        /// </summary>
         public static void StopAllCustomTracks(bool stopVanillaToo, bool disposeInstances)
         {
             StopAllTracks(disposeInstances);
@@ -653,7 +685,7 @@ namespace DMMusic
                     try
                     {
                         if (inst.State != SoundState.Stopped)
-                            inst.Stop();
+                            StopInstanceImmediate(inst);
 
                         if (disposeInstances)
                             inst.Dispose();
@@ -670,6 +702,10 @@ namespace DMMusic
                 _currentReplacementInstanceKey = null;
                 _currentReplacementPicked = null;
                 _currentReplacementSourceModId = null;
+                _currentCustomTrackId = null;
+
+                _lastCustomStartTrackId = null;
+                _lastCustomStartUtc = DateTime.MinValue;
 
                 if (_vanillaMusicVolume != null)
                 {
@@ -723,17 +759,11 @@ namespace DMMusic
         }
 
         public static bool HasReplacement(string trackId, out string matchedKey)
-        {
-            return HasReplacement(trackId, trackPlayIndex: null, out matchedKey);
-        }
+            => HasReplacement(trackId, trackPlayIndex: null, out matchedKey);
 
         public static void StopVanillaAudioForContext(MusicContext musicContext)
         {
-            try
-            {
-                Game1.stopMusicTrack(musicContext);
-            }
-            catch { }
+            try { Game1.stopMusicTrack(musicContext); } catch { }
 
             try
             {
@@ -742,11 +772,7 @@ namespace DMMusic
             }
             catch { }
 
-            try
-            {
-                Game1.loopingLocationCues?.StopAll();
-            }
-            catch { }
+            try { Game1.loopingLocationCues?.StopAll(); } catch { }
         }
 
         private static bool IsCurrentReplacementEnabledFor(string matchedKey)
@@ -774,5 +800,43 @@ namespace DMMusic
             return cfg.DisabledModIds.Contains(sourceModId);
         }
 
+        private static void EnforceVanillaMutedAndStopped()
+        {
+            try
+            {
+                if (_vanillaMusicVolume == null)
+                    _vanillaMusicVolume = Game1.musicPlayerVolume;
+
+                Game1.musicPlayerVolume = 0f;
+            }
+            catch { }
+
+            try
+            {
+                if (Game1.currentSong != null && Game1.currentSong.IsPlaying)
+                    Game1.currentSong.Stop(AudioStopOptions.Immediate);
+            }
+            catch { }
+
+            try { Game1.loopingLocationCues?.StopAll(); } catch { }
+        }
+
+        private static void StopInstanceImmediate(SoundEffectInstance inst)
+        {
+            if (inst == null) return;
+
+            try
+            {
+                var m = inst.GetType().GetMethod("Stop", new[] { typeof(bool) });
+                if (m != null)
+                {
+                    m.Invoke(inst, new object[] { true });
+                    return;
+                }
+            }
+            catch { }
+
+            try { inst.Stop(); } catch { }
+        }
     }
 }
